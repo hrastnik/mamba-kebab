@@ -13,18 +13,24 @@ const supabase = createClient(
 
 export async function POST(request: Request) {
   const body = await request.text();
-
-  // FIX FOR NEXT.JS 15: await headers()
   const headerPayload = await headers();
-  const sig = headerPayload.get("stripe-signature") as string;
+  const sig = headerPayload.get("stripe-signature");
+
+  // FIX: Check for missing keys immediately and return a RESPONSE, not just 'return'
+  if (!sig || !webhookSecret) {
+    console.error("❌ Missing Stripe Signature or Webhook Secret");
+    return NextResponse.json(
+      { error: "Missing Stripe Signature or Webhook Secret" },
+      { status: 400 }
+    );
+  }
 
   let event: Stripe.Event;
 
   try {
-    if (!sig || !webhookSecret) return; // Safety check
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
-    console.log(`❌ Error message: ${err.message}`);
+    console.error(`❌ Webhook signature verification failed: ${err.message}`);
     return NextResponse.json(
       { error: `Webhook Error: ${err.message}` },
       { status: 400 }
@@ -34,7 +40,6 @@ export async function POST(request: Request) {
   // Handle the event
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-
     const orderId = session.metadata?.order_id;
 
     if (orderId) {
@@ -52,5 +57,6 @@ export async function POST(request: Request) {
     }
   }
 
+  // Success response
   return NextResponse.json({ received: true });
 }
