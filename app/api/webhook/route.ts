@@ -13,11 +13,15 @@ const supabase = createClient(
 
 export async function POST(request: Request) {
   const body = await request.text();
-  const sig = headers().get("stripe-signature") as string;
+
+  // FIX FOR NEXT.JS 15: await headers()
+  const headerPayload = await headers();
+  const sig = headerPayload.get("stripe-signature") as string;
 
   let event: Stripe.Event;
 
   try {
+    if (!sig || !webhookSecret) return; // Safety check
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
     console.log(`❌ Error message: ${err.message}`);
@@ -31,8 +35,6 @@ export async function POST(request: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
-    // The user paid! Let's find the order and mark it as 'paid'
-    // We stored the order ID in metadata in the checkout route earlier
     const orderId = session.metadata?.order_id;
 
     if (orderId) {
