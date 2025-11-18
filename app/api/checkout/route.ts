@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-// We need a private Supabase client here to write to the database
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -13,25 +12,24 @@ const supabase = createClient(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { cart } = body;
+    const { cart, customerName } = body; // Receive name
 
-    if (!cart || cart.length === 0) {
-      return NextResponse.json({ error: "Cart is empty" }, { status: 400 });
-    }
+    if (!cart || cart.length === 0)
+      return NextResponse.json({ error: "Empty" }, { status: 400 });
 
-    // 1. Calculate total (Secure way: In a real app, you fetch prices from DB again here to prevent hacking.
-    // For now, we will trust the cart for simplicity, but keep this in mind).
     let total = 0;
     cart.forEach((item: any) => {
       total += item.price;
     });
 
-    // 2. Create the Order in Supabase first (Status: Pending)
+    // Create Order with new columns
     const { data: order, error } = await supabase
       .from("orders")
       .insert({
         total_price: total,
-        status: "pending",
+        order_status: "new", // Workflow status
+        payment_status: "unpaid", // Payment status
+        customer_name: customerName, // Who is picking it up
         items: cart,
       })
       .select()
@@ -39,17 +37,16 @@ export async function POST(request: Request) {
 
     if (error) throw new Error(error.message);
 
-    // 3. Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: cart.map((item: any) => ({
         price_data: {
           currency: "eur",
           product_data: {
-            name: item.name,
-            description: item.details, // Shows ingredients in Stripe
+            name: `${item.name} (${item.itemOwner})`, // Show "Kebab (Ivan)" in Stripe
+            description: item.details,
           },
-          unit_amount: Math.round(item.price * 100), // Stripe needs cents (e.g. 650 for €6.50)
+          unit_amount: Math.round(item.price * 100),
         },
         quantity: 1,
       })),
@@ -58,12 +55,9 @@ export async function POST(request: Request) {
         "origin"
       )}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${request.headers.get("origin")}/`,
-      metadata: {
-        order_id: order.id, // Link Stripe payment to our Supabase order
-      },
+      metadata: { order_id: order.id },
     });
 
-    // 4. Update order with session ID so we can find it later
     await supabase
       .from("orders")
       .update({ stripe_session_id: session.id })

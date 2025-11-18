@@ -48,7 +48,7 @@ export async function POST(request: Request) {
       const { error } = await supabase
         .from("orders")
         .update({
-          status: "paid",
+          payment_status: "paid", // ONLY update payment
           customer_details: session.customer_details,
         })
         .eq("id", orderId);

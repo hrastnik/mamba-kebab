@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-// --- TYPES ---
 type MenuItem = {
   id: number;
   name: string;
@@ -12,14 +11,14 @@ type MenuItem = {
 };
 
 type CartItem = {
-  uniqueId: string; // We need this because you might order 2 identical kebabs with different sauces
+  uniqueId: string;
   menuId: number;
   name: string;
   price: number;
-  details: string; // Stores the ingredients or the note
+  details: string;
+  itemOwner: string; // NEW: Name of person eating this specific item
 };
 
-// --- CONSTANTS ---
 const KEBAB_INGREDIENTS = [
   "Spicy sauce",
   "Soft sauce",
@@ -35,41 +34,40 @@ export default function MenuInterface({
 }: {
   menuItems: MenuItem[];
 }) {
-  // State for the Cart
   const [cart, setCart] = useState<CartItem[]>([]);
-
-  // State for the Popup Modal
-  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
 
-  // State for User Selections inside the Modal
+  // Modal Inputs
   const [kebabOptions, setKebabOptions] = useState<string[]>([]);
   const [textNote, setTextNote] = useState("");
+  const [itemOwner, setItemOwner] = useState(""); // NEW
 
-  // 1. Handle opening the modal
+  // Checkout Input
+  const [customerName, setCustomerName] = useState(""); // NEW
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+
   const openModal = (item: MenuItem) => {
     setSelectedItem(item);
-    // Reset choices
     setTextNote("");
-    // By default, maybe all ingredients are selected? Or none. Let's do none for now to be safe.
-    setKebabOptions([]);
+    setItemOwner("");
+    setKebabOptions(
+      item.options_type === "kebab" ? [...KEBAB_INGREDIENTS] : []
+    ); // Default all ON for kebabs?
     setIsModalOpen(true);
   };
 
-  // 2. Handle Adding to Cart
   const handleAddToCart = () => {
     if (!selectedItem) return;
 
     let finalDetails = "";
-
     if (selectedItem.options_type === "kebab") {
-      if (kebabOptions.length === 0) {
-        finalDetails = "No specific ingredients selected";
-      } else {
-        finalDetails = kebabOptions.join(", ");
-      }
+      finalDetails =
+        kebabOptions.length > 0
+          ? kebabOptions.join(", ")
+          : "No ingredients selected";
     } else {
-      finalDetails = textNote || "No special instructions";
+      finalDetails = textNote || "Standard";
     }
 
     const newItem: CartItem = {
@@ -78,47 +76,46 @@ export default function MenuInterface({
       name: selectedItem.name,
       price: selectedItem.price,
       details: finalDetails,
+      itemOwner: itemOwner || "Guest", // Default to Guest if empty
     };
 
     setCart([...cart, newItem]);
     setIsModalOpen(false);
   };
 
-  // 3. Toggle Kebab Ingredients
   const toggleIngredient = (ing: string) => {
-    if (kebabOptions.includes(ing)) {
+    if (kebabOptions.includes(ing))
       setKebabOptions(kebabOptions.filter((i) => i !== ing));
-    } else {
-      setKebabOptions([...kebabOptions, ing]);
-    }
+    else setKebabOptions([...kebabOptions, ing]);
   };
 
-  // 4. Calculate Total
   const cartTotal = cart.reduce((sum, item) => sum + item.price, 0);
 
   const handleCheckout = async () => {
-    // Show a loading state if you want, but for now:
+    if (!customerName.trim()) {
+      alert("Please enter your name for the order!");
+      return;
+    }
+    setIsCheckingOut(true);
+
     const response = await fetch("/api/checkout", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ cart }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cart, customerName }), // Sending name to backend
     });
 
     const data = await response.json();
-
-    if (data.url) {
-      window.location.href = data.url; // Redirect to Stripe
-    } else {
-      alert("Something went wrong!");
+    if (data.url) window.location.href = data.url;
+    else {
+      alert("Error starting checkout");
+      setIsCheckingOut(false);
     }
   };
 
   return (
-    <div className="relative">
-      {/* --- MENU GRID --- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-24">
+    <div className="relative pb-32">
+      {/* MENU GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {menuItems.map((item) => (
           <div
             key={item.id}
@@ -137,43 +134,78 @@ export default function MenuInterface({
               onClick={() => openModal(item)}
               className="mt-4 w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 font-semibold"
             >
-              Add to Order
+              Add
             </button>
           </div>
         ))}
       </div>
 
-      {/* --- FLOATING CART BAR --- */}
+      {/* CART BAR */}
       {cart.length > 0 && (
-        <div className="fixed bottom-0 left-0 w-full bg-white border-t-2 border-blue-600 p-4 shadow-2xl flex justify-between items-center z-40">
-          <div>
-            <p className="font-bold text-lg">{cart.length} Items</p>
-            <p className="text-gray-600 text-sm">
-              Total: €{cartTotal.toFixed(2)}
-            </p>
+        <div className="fixed bottom-0 left-0 w-full bg-white border-t-2 border-blue-600 p-4 shadow-2xl z-40">
+          <div className="max-w-4xl mx-auto">
+            {/* List items briefly */}
+            <div className="mb-4 max-h-32 overflow-y-auto text-sm text-gray-600 border-b pb-2">
+              {cart.map((item) => (
+                <div key={item.uniqueId} className="flex justify-between">
+                  <span>
+                    {item.name} ({item.itemOwner})
+                  </span>
+                  <span>€{item.price}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="w-full md:w-auto">
+                <label className="block text-xs font-bold text-gray-500 uppercase">
+                  Order Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Your Name (e.g. Marko)"
+                  className="border p-2 rounded w-full md:w-64 text-black"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+              </div>
+              <button
+                onClick={handleCheckout}
+                disabled={isCheckingOut}
+                className="w-full md:w-auto bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 disabled:opacity-50"
+              >
+                {isCheckingOut
+                  ? "Processing..."
+                  : `Pay €${cartTotal.toFixed(2)}`}
+              </button>
+            </div>
           </div>
-          <button
-            onClick={handleCheckout}
-            className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700"
-          >
-            Checkout (€{cartTotal.toFixed(2)})
-          </button>
         </div>
       )}
 
-      {/* --- MODAL (POPUP) --- */}
+      {/* MODAL */}
       {isModalOpen && selectedItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full text-black">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full text-black max-h-[90vh] overflow-y-auto">
             <h3 className="text-2xl font-bold mb-2">{selectedItem.name}</h3>
-            <p className="mb-4 text-gray-600">Customize your order:</p>
 
-            {/* LOGIC: If Kebab, show checkboxes. If Text, show input */}
+            {/* NEW: Item Owner Input */}
+            <div className="mb-4 bg-yellow-50 p-3 rounded border border-yellow-200">
+              <label className="block text-sm font-bold text-yellow-800 mb-1">
+                Who is this for? (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Ivan"
+                className="w-full border p-2 rounded bg-white"
+                value={itemOwner}
+                onChange={(e) => setItemOwner(e.target.value)}
+              />
+            </div>
+
             {selectedItem.options_type === "kebab" ? (
               <div className="space-y-2 mb-6">
-                <p className="font-semibold text-sm mb-2">
-                  Select Ingredients:
-                </p>
+                <p className="font-semibold text-sm mb-2">Ingredients:</p>
                 {KEBAB_INGREDIENTS.map((ing) => (
                   <label
                     key={ing}
@@ -192,12 +224,11 @@ export default function MenuInterface({
             ) : (
               <div className="mb-6">
                 <label className="block font-semibold text-sm mb-2">
-                  Special Requests / Changes:
+                  Notes:
                 </label>
                 <textarea
                   className="w-full border p-2 rounded"
                   rows={3}
-                  placeholder="e.g. No pickles, extra mayo..."
                   value={textNote}
                   onChange={(e) => setTextNote(e.target.value)}
                 />
@@ -207,15 +238,15 @@ export default function MenuInterface({
             <div className="flex gap-3 mt-4">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="flex-1 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-100"
+                className="flex-1 py-2 border border-gray-300 rounded text-gray-700"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddToCart}
-                className="flex-1 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700"
+                className="flex-1 py-2 bg-blue-600 text-white rounded font-bold"
               >
-                Add to Cart - €{selectedItem.price.toFixed(2)}
+                Add to Order
               </button>
             </div>
           </div>
